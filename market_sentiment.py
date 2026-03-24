@@ -2,7 +2,7 @@ import akshare as ak
 import pandas as pd
 
 # 目标：获取 2026 年 3 月 23 日的涨停板数据
-target_date = "20260323" 
+target_date = "20260324" 
 
 print(f"正在向服务器请求 {target_date} 的 A 股涨停数据，请稍候...")
 

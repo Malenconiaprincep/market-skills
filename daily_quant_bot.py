@@ -1,7 +1,8 @@
 import os
 
-import akshare as ak
 from openai import OpenAI
+
+from market_sentiment_core import get_market_data
 
 # ================= ⚙️ 配置区 =================
 # 硅基流动 Key：仅通过环境变量注入，勿写入仓库。本地示例：export SILICONFLOW_API_KEY="sk-..."
@@ -11,27 +12,11 @@ LLM_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 # 输出到 stdout，供 OpenClaw 等编排后对接飞书等渠道
 # =================================================================
 
-def get_market_data(target_date):
-    """抓取 A 股情绪核心数据"""
+def fetch_market_data_safe(target_date):
+    """抓取 A 股情绪核心数据；失败时打印原因并返回零值。"""
     print(f"📊 正在获取 {target_date} A 股真实盘面数据...")
     try:
-        # 涨停数据
-        df_zt = ak.stock_zt_pool_em(date=target_date)
-        zt_count = len(df_zt) if not df_zt.empty else 0
-        
-        # 跌停数据 (dtgc 接口)
-        df_dt = ak.stock_zt_pool_dtgc_em(date=target_date)
-        dt_count = len(df_dt) if not df_dt.empty else 0
-        
-        # 最高连板
-        top_height = 0
-        top_stock = "无"
-        if zt_count > 0:
-            df_zt_sorted = df_zt.sort_values(by='连板数', ascending=False)
-            top_height = df_zt_sorted.iloc[0]['连板数']
-            top_stock = df_zt_sorted.iloc[0]['名称']
-            
-        return zt_count, dt_count, top_height, top_stock
+        return get_market_data(target_date)
     except Exception as e:
         print(f"❌ 数据获取失败: {e}")
         return 0, 0, 0, "错误"
@@ -74,9 +59,9 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
     # 目标交易日 YYYYMMDD；需要当天可改为 datetime.now().strftime("%Y%m%d") 并 from datetime import datetime
-    TODAY = "20260323"
+    TODAY = "20260324"
 
-    zt, dt, height, stock = get_market_data(TODAY)
+    zt, dt, height, stock = fetch_market_data_safe(TODAY)
     if zt > 0 or dt > 0:
         report = generate_ai_report(TODAY, zt, dt, height, stock)
         temp = (zt / (zt + dt)) * 100 if (zt + dt) > 0 else 0.0
