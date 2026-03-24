@@ -31,6 +31,7 @@ from market_sentiment_core import (  # noqa: E402
     get_limit_down_pool,
     get_limit_up_pool,
     get_market_data,
+    get_market_data_realtime_spot,
 )
 from services.alert_engine import evaluate_intraday_alerts  # noqa: E402
 from services.llm_service import cycle_phase_from_temperature  # noqa: E402
@@ -39,7 +40,7 @@ from services.post_market import (  # noqa: E402
     run_post_market_pipeline,
     sentiment_temperature,
 )
-from shanghai_calendar import trading_date_str  # noqa: E402
+from shanghai_calendar import in_trading_window, trading_date_str  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("market-skills")
@@ -79,14 +80,6 @@ def _minutes_since_midnight_sh() -> int:
     return n.hour * 60 + n.minute
 
 
-def in_trading_window() -> bool:
-    """盘中：09:25–15:00（工作日）。"""
-    if not _is_weekday_sh():
-        return False
-    t = _minutes_since_midnight_sh()
-    return (9 * 60 + 25) <= t < (15 * 60)
-
-
 def in_post_market_fire_window() -> bool:
     """盘后单次触发窗口：15:05–15:08（工作日），与 60s tick 对齐。"""
     if not _is_weekday_sh():
@@ -119,11 +112,16 @@ def unified_daemon_loop() -> None:
             # —— 盘中实时分支 ——
             if in_trading_window():
                 try:
-                    zt, dt, height, stock = get_market_data(date_str)
+                    # 涨跌停家数：东财 A 股实时行情 stock_zh_a_spot_em；连板/空间龙仍用当日涨停池
+                    zt, dt, height, stock = get_market_data_realtime_spot(date_str)
                 except Exception:
-                    logger.exception("get_market_data 失败")
-                    time.sleep(60)
-                    continue
+                    logger.exception("get_market_data_realtime_spot 失败，回退涨跌停池")
+                    try:
+                        zt, dt, height, stock = get_market_data(date_str)
+                    except Exception:
+                        logger.exception("get_market_data 回退失败")
+                        time.sleep(60)
+                        continue
 
                 temp = sentiment_temperature(zt, dt)
                 phase, note = cycle_phase_from_temperature(temp)
@@ -283,7 +281,7 @@ def api_limit_up(request: Request, date: str | None = Query(None)) -> JSONRespon
     assert d is not None
     try:
         rows = get_limit_up_pool(d)
-        return JSONResponse(
+        return JSONResponse(  
             {
                 "ok": True,
                 "date": d,

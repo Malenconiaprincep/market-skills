@@ -14,10 +14,32 @@ from intraday_alerts import (
     evaluate_ice_point_reversal,
 )
 from intraday_state import load_snapshot, save_snapshot, state_backend_configured
-from market_sentiment_core import MarketSnapshot, build_snapshot
-from shanghai_calendar import trading_date_str
+from market_sentiment_core import (
+    MarketSnapshot,
+    build_snapshot_daily_pools,
+    build_snapshot_intraday_live,
+)
+from shanghai_calendar import in_trading_window, trading_date_str
 
 SLOTS = ("09:40", "10:30", "14:30")
+
+
+def _slot_matches_current_session(slot: str) -> bool:
+    """
+    仅在「当前上海时刻属于该槽位对应时段」时写入 Redis，避免下午轮询误覆盖早盘槽位。
+    时段：09:40∈[09:40,10:30)，10:30∈[10:30,14:30)，14:30∈[14:30,15:00)。
+    """
+    if not in_trading_window():
+        return False
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    mins = now.hour * 60 + now.minute
+    if slot == "09:40":
+        return (9 * 60 + 40) <= mins < (10 * 60 + 30)
+    if slot == "10:30":
+        return (10 * 60 + 30) <= mins < (14 * 60 + 30)
+    if slot == "14:30":
+        return (14 * 60 + 30) <= mins < (15 * 60)
+    return False
 
 
 def _api_secret() -> str:
@@ -72,8 +94,32 @@ def run_intraday(slot: str) -> dict[str, Any]:
     date = trading_date_str()
     err: Optional[str] = None
     snap: Optional[MarketSnapshot] = None
+    snapshot_mode = "live_spot"
+    hint: Optional[str] = None
+
     try:
-        snap = build_snapshot(date, slot)
+        if in_trading_window():
+            # 连续竞价内：spot 全市场行情 + 涨停池连板（真「当前」）
+            snap = build_snapshot_intraday_live(date, slot)
+            snapshot_mode = "live_spot"
+        else:
+            # 收盘后/盘前：勿再用 spot（实为最新价≈收盘），优先读该槽位已落库快照
+            cached = load_snapshot(date, slot)
+            if cached is not None:
+                snap = cached
+                snapshot_mode = "cached_slot"
+                hint = (
+                    "该槽位指标来自已保存的盘中快照（Upstash）；"
+                    "下方涨跌停表为东财当日汇总，若与指标略有差异属时点不同。"
+                )
+            else:
+                snap = build_snapshot_daily_pools(date, slot)
+                snapshot_mode = "eod_pool"
+                hint = (
+                    "当前非连续竞价时段，未找到该槽位落库快照；"
+                    "上方指标为东财当日日终涨跌停池口径，与「盘中瞬时」不同；"
+                    "槽位下拉仅作分组，刷新得到的是收盘后汇总而非历史时点 replay。"
+                )
     except Exception:
         err = traceback.format_exc()
 
@@ -85,12 +131,14 @@ def run_intraday(slot: str) -> dict[str, Any]:
             "date": date,
         }
 
-    saved = save_snapshot(snap)
+    saved = save_snapshot(snap) if _slot_matches_current_session(slot) else False
     result: dict[str, Any] = {
         "ok": True,
         "date": date,
         "slot": slot,
         "snapshot": snap.to_json_dict(),
+        "snapshot_mode": snapshot_mode,
+        "hint": hint,
         "state_saved": saved,
         "state_backend_configured": state_backend_configured(),
     }

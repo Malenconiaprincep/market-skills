@@ -103,6 +103,68 @@ def run_post_market_pipeline(trading_date_yyyymmdd: str) -> Dict[str, Any]:
     }
 
 
+def append_sentiment_openclaw_no_llm(trading_date_yyyymmdd: str) -> Dict[str, Any]:
+    """
+    供 OpenClaw / market_sentiment.py：仅同步东财盘面数字到飞书情绪表，不调用大模型；
+    「情绪结论」写入占位句。查重逻辑与 run_post_market_pipeline 一致。
+    """
+    target_display = f"{trading_date_yyyymmdd[:4]}-{trading_date_yyyymmdd[4:6]}-{trading_date_yyyymmdd[6:8]}"
+
+    try:
+        records, err = fetch_sentiment_history_for_dashboard(days=40)
+        if err is None and records:
+            for r in records:
+                fd = r.get("fields", {}).get("date")
+                if _norm_date_key(fd) == target_display:
+                    return {
+                        "ok": True,
+                        "skipped": True,
+                        "reason": "already_in_feishu",
+                        "date": trading_date_yyyymmdd,
+                        "llm_used": False,
+                    }
+    except Exception as e:
+        logger.warning("查重失败，继续写入：%s", e)
+
+    zt, dt, height, stock = get_market_data(trading_date_yyyymmdd)
+    temp = sentiment_temperature(zt, dt)
+    phase, note = cycle_phase_from_temperature(temp)
+    placeholder = "（OpenClaw / market_sentiment.py 同步，未生成 AI 复盘）"
+
+    ok_fs: Optional[bool] = None
+    err_fs: Optional[str] = None
+    try:
+        ok_fs, err_fs = append_sentiment_row(
+            date_display=target_display,
+            zt_count=zt,
+            dt_count=dt,
+            temperature=temp,
+            ai_recap_text=placeholder,
+            top_stock=stock,
+            top_height=height,
+        )
+    except Exception as e:
+        ok_fs = False
+        err_fs = str(e)
+        logger.exception("飞书写入失败")
+
+    return {
+        "ok": bool(ok_fs),
+        "skipped": False,
+        "date": trading_date_yyyymmdd,
+        "zt_count": zt,
+        "dt_count": dt,
+        "temperature": round(temp, 2),
+        "top_height": height,
+        "top_stock": stock,
+        "cycle_phase": phase,
+        "cycle_note": note,
+        "feishu_written": ok_fs,
+        "feishu_error": err_fs,
+        "llm_used": False,
+    }
+
+
 def feishu_history_payload() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """供 GET /api/history 使用。"""
     records, err = fetch_sentiment_history_for_dashboard(days=15)

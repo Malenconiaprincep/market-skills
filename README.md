@@ -18,9 +18,9 @@ uvicorn main:app --host 0.0.0.0 --port 8787
 
 | 路径 | 说明 |
 |------|------|
-| `GET /api/realtime` | 盘中实时 + 预警 |
+| `GET /api/realtime` | 盘中实时 + 预警（涨跌停家数：`stock_zh_a_spot_em`；连板/空间龙：当日涨停池） |
 | `GET /api/history` | 飞书情绪表历史 |
-| `GET/POST /api/intraday` | 与旧版一致的盘中快照（槽位 09:40/10:30/14:30） |
+| `GET/POST /api/intraday` | 盘中快照（槽位 09:40/10:30/14:30）：连续竞价内用 `stock_zh_a_spot_em`；**收盘后**优先读 Upstash 落库快照，否则为东财**日终池**口径（见响应 `snapshot_mode` / `hint`） |
 | `GET /api/limit_up` `GET /api/limit_down` | 涨跌停池 |
 | `POST /api/admin/post_market_now` | 手动盘后流水线 |
 
@@ -37,7 +37,7 @@ uvicorn main:app --host 0.0.0.0 --port 8787
 | **`intraday_runner.py`** | `/api/intraday` 调用的「单次盘中任务」+ 鉴权；含 14:30 冰点预警、Upstash 快照 |
 | **`intraday_alerts.py`**、**`intraday_state.py`** | 仅被 `intraday_runner` 使用（跨槽位对比、Redis） |
 | **`scripts/daily_quant_cli.py`** | 命令行跑一次盘后流水线（与 `POST /api/admin/post_market_now` 等价） |
-| **`market_sentiment.py`** | **独立脚本**：拉涨停/跌停并打印情绪切片，供 **OpenClaw** 等编排 stdout 再接飞书 |
+| **`market_sentiment.py`** | **OpenClaw**：与 `market_sentiment_core` / `GET /api/limit_up` 同源；支持 `--json`、`--write-feishu`（仅盘面或 `--with-llm` 完整盘后）写入飞书情绪表 |
 | **`daily_quant_bot.py`** | **独立脚本**：拉数据 + 调大模型生成复盘正文，stdout 供 OpenClaw 写入飞书；与 `services/llm_service.py` 并存（服务内用后者，编排用本脚本） |
 ## 与 market-web 联调
 
