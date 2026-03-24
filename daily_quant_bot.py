@@ -25,23 +25,23 @@ def generate_ai_report(date, zt_count, dt_count, top_height, top_stock):
     """调用大模型生成退哥风格的游资复盘"""
     print("🧠 正在呼叫 AI 大脑生成复盘策略...")
     client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
-    
+
     prompt = f"""
     你是一个深谙 A 股超短线情绪周期的实战派游资大V（风格类似'退哥'）。
     你的交易核心是看大做小，通过涨跌停家数、连板高度来判断市场目前处于：主升期、高位震荡期、退潮期，还是极致冰点期。
-    
+
     今日（{date}）真实盘面数据如下：
     - 涨停家数：{zt_count} 家
     - 跌停家数：{dt_count} 家
     - 市场最高连板：{top_height} 连板（代表个股：{top_stock}）
-    
+
     请根据以上客观数据，写一份 200 字左右的收盘复盘。
     要求：
     1. 语气犀利、客观、一针见血。
     2. 明确指出当前的情绪周期阶段。
     3. 直接给出明天的操作纪律（例如：空仓防守、试错首板、拥抱核心龙头等）。
     """
-    
+
     try:
         response = client.chat.completions.create(
             model=LLM_MODEL,
