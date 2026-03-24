@@ -43,4 +43,13 @@ uvicorn main:app --host 0.0.0.0 --port 8787
 
 `market-web` 的 `MARKET_SKILLS_API_BASE` 指向上述 `uvicorn` 地址即可。
 
-云端部署若需 **Vercel** 等，请自行用 **Docker / 容器** 跑 `uvicorn main:app`，本仓库已不再提供 `api/*.py` 无框架 Serverless 入口。
+### Vercel 部署（无长驻进程）
+
+仓库含 **`vercel.json`** + **`api/index.py`**（Mangum 挂载 FastAPI）。在项目根连接 Vercel 后：
+
+1. **环境变量**：在 Vercel 控制台配置 `.env.example` 中需要的项（飞书、密钥等）；`VERCEL=1` 由平台自动注入，会**跳过** `unified_daemon_loop`（无 60s 后台线程）。
+2. **访问路径**：根路径 **`/`** 会返回服务说明（勿再以「未配置路由」误判为挂掉）；健康检查 **`/health`**；业务接口仍为 **`/api/realtime`**、`/api/history` 等。
+3. **`market-web`**：将 `MARKET_SKILLS_API_BASE` 设为 `https://<你的项目>.vercel.app`（无尾部斜杠）。
+4. **限制**：盘中轮询守护、强预警依赖**常驻进程**，Vercel 上仅适合「按需 HTTP」；完整引擎请用 **Docker / Railway / Render** 跑 `uvicorn main:app`。
+
+若仍见 **`{"detail":"Not Found"}`**：多半是请求了**未注册的路径**（仅 `/`、`/health`、`/docs`、`/api/*` 等可用），或 **未用本仓库的 `vercel.json` 重写**导致请求未进到 `api/index.py`。
